@@ -22,11 +22,12 @@ export default function Home() {
   const channel = ably.channels.get("anonymous-questions-pro");
 
   useEffect(() => {
-    // ... (Ablyの購読ロジックは変更なし) ...
-    const subscribeToQuestions = async () => {
+    const subscribeToEvents = async () => {
+      // 新しい質問
       await channel.subscribe("new-question", (message: Types.Message) => {
         setQuestions((prev) => [message.data, ...prev]);
       });
+      // いいね
       await channel.subscribe("like-question", (message: Types.Message) => {
         const { questionId } = message.data;
         setQuestions((prev) =>
@@ -35,8 +36,8 @@ export default function Home() {
           )
         );
       });
-    };
-    const subscribeToReactions = async () => {
+      // ★ 削除イベントの購読は不要なため削除
+      // フローティングリアクション
       await channel.subscribe("new-reaction", (message: Types.Message) => {
         const newReaction = message.data as Reaction;
         setFloatingReactions((prev) => [...prev, newReaction]);
@@ -47,23 +48,25 @@ export default function Home() {
         }, 5000);
       });
     };
-    subscribeToQuestions();
-    subscribeToReactions();
+
+    subscribeToEvents();
     return () => {
       channel.unsubscribe();
     };
   }, [channel]);
 
-  // ... (送信関連のロジックは変更なし) ...
   const sendQuestion = (text: string) => {
     const newQuestion: Question = {
       id: crypto.randomUUID(),
       text: text,
       likes: 0,
       timestamp: Date.now(),
+      isAnswered: false,
+      isPinned: false,
     };
     channel.publish("new-question", newQuestion);
   };
+
   const sendLike = (questionId: string) => {
     if (likedQuestionIds.includes(questionId)) return;
     const now = Date.now();
@@ -81,6 +84,7 @@ export default function Home() {
       now,
     ]);
   };
+
   const sendReaction = (emoji: string) => {
     const now = Date.now();
     const oneMinuteAgo = now - 60000;
@@ -111,9 +115,9 @@ export default function Home() {
   }, [questions, sortOrder]);
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900 font-sans">
       <Header />
-      <div className="flex-grow relative overflow-hidden">
+      <main className="flex-grow relative flex flex-col">
         <FloatingReactions reactions={floatingReactions} />
         <SortControl
           sortOrder={sortOrder}
@@ -132,7 +136,7 @@ export default function Home() {
             {rateLimitMessage}
           </div>
         )}
-      </div>
+      </main>
       <QuestionForm
         onSendQuestion={sendQuestion}
         onSendReaction={sendReaction}

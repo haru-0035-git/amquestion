@@ -4,11 +4,13 @@ export type Question = {
   text: string;
   likes: number;
   timestamp: number;
+  isAnswered: boolean; // 回答済みかどうかのフラグ
+  isPinned: boolean; // ピックアップされているかのフラグ
 };
 
 // フローティングリアクションのデータ構造
 export type Reaction = {
   id: string;
   emoji: string;
-  x: number; // 画面のどの水平位置からスタートするか (0 to 1)
+  x: number;
 };
