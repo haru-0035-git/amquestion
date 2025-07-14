@@ -2,13 +2,12 @@
 
 import React, { useState } from "react";
 
-// 簡単なパスワード認証コンポーネント
+// このコンポーネントは認証に成功すると、子要素(children)をそのまま表示します
 export const AdminAuth = ({ children }: { children: React.ReactNode }) => {
   const [password, setPassword] = useState("");
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [error, setError] = useState("");
 
-  // 簡単なパスワードチェック
   const handleLogin = () => {
     // このパスワードは後で環境変数などに移動するのが望ましいです
     if (password === "password123") {
@@ -19,10 +18,12 @@ export const AdminAuth = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  // 認証が成功した場合、渡された子要素を表示します
   if (isAuthenticated) {
     return <>{children}</>;
   }
 
+  // 認証が成功していない場合、ログインフォームを表示します
   return (
     <div className="flex items-center justify-center h-screen">
       <div className="w-full max-w-xs p-6 bg-white dark:bg-gray-800 rounded-lg shadow-md">
