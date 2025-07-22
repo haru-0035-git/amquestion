@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import { type Types } from "ably";
+import { type Types } from "ably"; // Ablyの型を正しくインポート
 import type { Question, Reaction } from "@/types";
 import { ably } from "@/lib/ably";
 import { Header } from "@/components/Header";
@@ -23,66 +23,93 @@ export const QuestionView = ({ isAdmin = false }: QuestionViewProps) => {
   const [floatingReactions, setFloatingReactions] = useState<Reaction[]>([]);
   const [reactionTimestamps, setReactionTimestamps] = useState<number[]>([]);
 
+  // 型を Types.PresenceMessage に修正
+  const [presenceMembers, setPresenceMembers] = useState<
+    Types.PresenceMessage[]
+  >([]);
+
   const channel = ably.channels.get("anonymous-questions-pro");
 
   useEffect(() => {
-    const subscribeToEvents = async () => {
-      // ... (他の購読処理は変更なし) ...
-      await channel.subscribe("new-question", (message: Types.Message) => {
-        setQuestions((prev) => [message.data, ...prev]);
-      });
-      await channel.subscribe("like-question", (message: Types.Message) => {
-        const { questionId } = message.data;
-        setQuestions((prev) =>
-          prev.map((q) =>
-            q.id === questionId ? { ...q, likes: q.likes + 1 } : q
-          )
-        );
-      });
-      await channel.subscribe("mark-as-answered", (message: Types.Message) => {
-        const { questionId } = message.data;
-        setQuestions((prev) =>
-          prev.map((q) =>
-            q.id === questionId ? { ...q, isAnswered: true } : q
-          )
-        );
-      });
-      await channel.subscribe("new-reaction", (message: Types.Message) => {
-        const newReaction = message.data as Reaction;
-        setFloatingReactions((prev) => [...prev, newReaction]);
-        setTimeout(() => {
-          setFloatingReactions((prev) =>
-            prev.filter((r) => r.id !== newReaction.id)
-          );
-        }, 5000);
-      });
-
-      // ★ ピン留めイベントの購読を追加
-      await channel.subscribe("toggle-pin", (message: Types.Message) => {
-        const { questionId } = message.data;
-        setQuestions((prev) => {
-          const isCurrentlyPinned = prev.find(
-            (q) => q.id === questionId
-          )?.isPinned;
-          // もしクリックされた質問が既にピン留めされていたら、全てのピンを外す
-          if (isCurrentlyPinned) {
-            return prev.map((q) => ({ ...q, isPinned: false }));
-          }
-          // そうでなければ、クリックされた質問をピン留めし、他は外す
-          else {
-            return prev.map((q) => ({ ...q, isPinned: q.id === questionId }));
-          }
-        });
-      });
+    // 接続メンバーのリストを更新する関数
+    const updatePresenceMembers = async () => {
+      const members = await channel.presence.get();
+      setPresenceMembers(members);
     };
 
-    subscribeToEvents();
+    // 自身が接続したことを、管理者情報(isAdmin)と共に通知
+    channel.presence.enter({ isAdmin });
+    updatePresenceMembers();
+
+    // 他のユーザーの入退室や情報の更新を監視
+    channel.presence.subscribe(
+      ["enter", "leave", "update"],
+      updatePresenceMembers
+    );
+
     return () => {
-      channel.unsubscribe();
+      channel.presence.unsubscribe();
+      channel.presence.leave();
+    };
+  }, [channel, isAdmin]);
+
+  useEffect(() => {
+    // messageの型を Types.Message に修正
+    const onNewQuestion = (message: Types.Message) => {
+      setQuestions((prev) => [message.data, ...prev]);
+    };
+    const onLikeQuestion = (message: Types.Message) => {
+      const { questionId } = message.data;
+      setQuestions((prev) =>
+        prev.map((q) =>
+          q.id === questionId ? { ...q, likes: q.likes + 1 } : q
+        )
+      );
+    };
+    const onMarkAsAnswered = (message: Types.Message) => {
+      const { questionId } = message.data;
+      setQuestions((prev) =>
+        prev.map((q) => (q.id === questionId ? { ...q, isAnswered: true } : q))
+      );
+    };
+    const onTogglePin = (message: Types.Message) => {
+      const { questionId } = message.data;
+      setQuestions((prev) => {
+        const isCurrentlyPinned = prev.find(
+          (q) => q.id === questionId
+        )?.isPinned;
+        if (isCurrentlyPinned) {
+          return prev.map((q) => ({ ...q, isPinned: false }));
+        } else {
+          return prev.map((q) => ({ ...q, isPinned: q.id === questionId }));
+        }
+      });
+    };
+    const onNewReaction = (message: Types.Message) => {
+      const newReaction = message.data as Reaction;
+      setFloatingReactions((prev) => [...prev, newReaction]);
+      setTimeout(() => {
+        setFloatingReactions((prev) =>
+          prev.filter((r) => r.id !== newReaction.id)
+        );
+      }, 5000);
+    };
+
+    channel.subscribe("new-question", onNewQuestion);
+    channel.subscribe("like-question", onLikeQuestion);
+    channel.subscribe("mark-as-answered", onMarkAsAnswered);
+    channel.subscribe("toggle-pin", onTogglePin);
+    channel.subscribe("new-reaction", onNewReaction);
+
+    return () => {
+      channel.unsubscribe("new-question", onNewQuestion);
+      channel.unsubscribe("like-question", onLikeQuestion);
+      channel.unsubscribe("mark-as-answered", onMarkAsAnswered);
+      channel.unsubscribe("toggle-pin", onTogglePin);
+      channel.unsubscribe("new-reaction", onNewReaction);
     };
   }, [channel]);
 
-  // ... (sendQuestion, sendLike, sendReactionのロジックは変更なし) ...
   const sendQuestion = (text: string) => {
     const newQuestion: Question = {
       id: crypto.randomUUID(),
@@ -130,24 +157,27 @@ export const QuestionView = ({ isAdmin = false }: QuestionViewProps) => {
     channel.publish("new-reaction", newReaction);
     setReactionTimestamps([...recentReactions, now]);
   };
-
   const markAsAnswered = (questionId: string) => {
     channel.publish("mark-as-answered", { questionId });
   };
-
-  // ★ ピン留め・解除をトグルする関数を追加
   const togglePin = (questionId: string) => {
     channel.publish("toggle-pin", { questionId });
   };
 
-  // ★ ソートロジックを更新
+  // 参加者リストから管理者と参加者の数を計算
+  const { adminCount, participantCount } = useMemo(() => {
+    const admins = presenceMembers.filter((member) => member.data?.isAdmin);
+    const participants = presenceMembers.filter(
+      (member) => !member.data?.isAdmin
+    );
+    return { adminCount: admins.length, participantCount: participants.length };
+  }, [presenceMembers]);
+
   const sortedQuestions = useMemo(() => {
     return [...questions].sort((a, b) => {
-      // ピン留めされた質問を常に最優先
       if (a.isPinned !== b.isPinned) {
         return a.isPinned ? -1 : 1;
       }
-      // 通常のソート順
       if (sortOrder === "most-liked") {
         if (b.likes !== a.likes) return b.likes - a.likes;
       }
@@ -157,7 +187,11 @@ export const QuestionView = ({ isAdmin = false }: QuestionViewProps) => {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900 font-sans">
-      <Header isAdmin={isAdmin} />
+      <Header
+        isAdmin={isAdmin}
+        adminCount={adminCount}
+        participantCount={participantCount}
+      />
       <main className="flex-grow relative flex flex-col">
         <FloatingReactions reactions={floatingReactions} />
         <SortControl
@@ -172,7 +206,7 @@ export const QuestionView = ({ isAdmin = false }: QuestionViewProps) => {
           likedQuestionIds={likedQuestionIds}
           isAdmin={isAdmin}
           onMarkAsAnswered={markAsAnswered}
-          onPin={togglePin} // 新しい関数を渡す
+          onPin={togglePin}
         />
 
         {rateLimitMessage && (
